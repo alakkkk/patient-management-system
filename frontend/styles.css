@@ -40,6 +40,8 @@ button.primary { background: var(--accent); color: #fff; }
 button.primary:hover { background: #0b5e57; }
 button.ghost { background: transparent; border-color: var(--line); color: var(--ink); }
 button.ghost:hover { border-color: var(--ink-soft); }
+button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+button.danger:hover { background: var(--danger-soft); }
 button.small { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
 button:disabled { opacity: 0.55; cursor: default; }
 
@@ -98,8 +100,17 @@ label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0.75rem 0 0
   padding: 0.75rem 1.5rem;
   position: sticky; top: 0; z-index: 5;
 }
+.topbar-left { display: flex; align-items: center; gap: 1.75rem; }
 .topbar .brand { cursor: pointer; }
 .topbar-right { display: flex; align-items: center; gap: 1rem; }
+
+.nav { display: flex; gap: 0.25rem; }
+.nav-link {
+  background: transparent; border: none; color: var(--ink-soft);
+  padding: 0.4rem 0.75rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem;
+}
+.nav-link:hover { background: var(--bg); color: var(--ink); }
+.nav-link.active { background: var(--accent-soft); color: #0b5e57; }
 
 #main { max-width: 960px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
 
@@ -114,6 +125,18 @@ label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0.75rem 0 0
   padding: 0; font-size: 0.85rem; margin-bottom: 0.75rem;
 }
 
+/* --- Stat cards --- */
+.stat-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 1rem; margin-bottom: 1.5rem;
+}
+.stat {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.1rem 1.25rem;
+}
+.stat .num { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.stat .lbl { color: var(--ink-soft); font-size: 0.85rem; margin-top: 0.25rem; }
+
 /* --- Cards & layout --- */
 .card {
   background: var(--surface);
@@ -124,6 +147,8 @@ label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0.75rem 0 0
   margin-bottom: 1.25rem;
 }
 .card h3 { margin: 0 0 0.9rem; font-size: 1.05rem; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.9rem; }
+.card-head h3 { margin: 0; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 .row { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; }
 .row > * { flex: 1; min-width: 140px; }
@@ -133,8 +158,8 @@ label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0.75rem 0 0
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.7rem 0.5rem; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
 th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
-tbody tr { cursor: pointer; }
-tbody tr:hover { background: var(--bg); }
+tbody tr.clickable { cursor: pointer; }
+tbody tr.clickable:hover { background: var(--bg); }
 tbody tr.norow:hover { background: transparent; cursor: default; }
 
 .toolbar { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
@@ -157,6 +182,7 @@ tbody tr.norow:hover { background: transparent; cursor: default; }
   border: 1px solid var(--line); border-radius: 8px; padding: 0.85rem 1rem;
 }
 .record .rx { font-size: 0.85rem; color: var(--ink-soft); margin-top: 0.35rem; }
+.record-actions { display: flex; gap: 0.4rem; align-items: center; }
 .empty { color: var(--ink-soft); font-size: 0.9rem; padding: 0.5rem 0; }
 
 .dl { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1.5rem; font-size: 0.9rem; }
@@ -165,7 +191,19 @@ tbody tr.norow:hover { background: transparent; cursor: default; }
 
 .mono { font-variant-numeric: tabular-nums; }
 
+/* --- Toast --- */
+#toast {
+  position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%);
+  background: var(--ink); color: #fff; padding: 0.65rem 1.1rem; border-radius: 8px;
+  font-size: 0.9rem; box-shadow: var(--shadow); opacity: 0; pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s; z-index: 20;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+#toast.err { background: var(--danger); }
+
 @media (max-width: 620px) {
   .grid-2 { grid-template-columns: 1fr; }
+  .stat-grid { grid-template-columns: 1fr; }
   #main { padding: 1.25rem 1rem 3rem; }
+  .topbar-left { gap: 1rem; }
 }
