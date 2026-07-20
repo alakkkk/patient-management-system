@@ -1,4 +1,4 @@
-const { SUPABASE_URL, SUPABASE_ANON_KEY, API_BASE } = window.CONFIG;
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.CONFIG;
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const $ = (id) => document.getElementById(id);
@@ -14,26 +14,15 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : "—");
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—";
 
-// Authenticated call to the Express API
-async function api(path, options = {}) {
-  const { data } = await sb.auth.getSession();
-  const token = data.session?.access_token;
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
-  }
-  return res.status === 204 ? null : res.json();
+// Supabase returns { data, error }. Throw on error, otherwise return data.
+function unwrap({ data, error }) {
+  if (error) throw error;
+  return data;
 }
 
-let PROVIDERS = []; // cached staff list for dropdowns
+let PROVIDERS = [];   // cached staff list for dropdowns
+let CURRENT_USER = null; // logged-in user id
+let CURRENT_PATIENT = null; // patient detail currently open
 
 // ---- auth flow -----------------------------------------------------------
 $("login-btn").addEventListener("click", async () => {
@@ -62,15 +51,23 @@ async function showApp() {
   $("login-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
   try {
-    const me = await api("/api/me");
-    const name = me.profile?.full_name || me.user.email;
-    const role = me.profile?.role ? ` · ${me.profile.role}` : "";
+    const { data: { user } } = await sb.auth.getUser();
+    CURRENT_USER = user.id;
+
+    const profile = unwrap(
+      await sb.from("profiles").select("*").eq("id", user.id).single()
+    );
+    const name = profile?.full_name || user.email;
+    const role = profile?.role ? ` · ${profile.role}` : "";
     $("who").textContent = `${name}${role}`;
-    PROVIDERS = await api("/api/profiles");
+
+    PROVIDERS = unwrap(
+      await sb.from("profiles").select("id, full_name, role").order("full_name")
+    );
     renderPatientList();
   } catch (err) {
     main.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p>
-      <p class="muted">Is the API running and is API_BASE set correctly in config.js?</p></div>`;
+      <p class="muted">Check your Supabase URL / publishable key in config.js.</p></div>`;
   }
 }
 
@@ -86,6 +83,7 @@ const providerOptions = (selected) =>
 
 // ---- patient list --------------------------------------------------------
 async function renderPatientList() {
+  CURRENT_PATIENT = null;
   main.innerHTML = `
     <div class="page-head">
       <h2>Patients</h2>
@@ -113,7 +111,10 @@ async function renderPatientList() {
 async function loadPatients(search) {
   const rows = $("patient-rows");
   try {
-    const patients = await api(`/api/patients?search=${encodeURIComponent(search)}`);
+    let query = sb.from("patients").select("*").order("full_name");
+    if (search) query = query.or(`full_name.ilike.%${search}%,mrn.ilike.%${search}%`);
+    const patients = unwrap(await query);
+
     if (!patients.length) {
       rows.innerHTML = `<tr class="norow"><td colspan="4" class="empty">No patients found.</td></tr>`;
       return;
@@ -160,9 +161,13 @@ function togglePatientForm() {
       phone: $("f-phone").value.trim(),
       email: $("f-email").value.trim(),
       address: $("f-address").value.trim(),
+      created_by: CURRENT_USER,
     };
+    if (!payload.mrn || !payload.full_name) {
+      return ($("pf-error").textContent = "MRN and full name are required.");
+    }
     try {
-      await api("/api/patients", { method: "POST", body: JSON.stringify(payload) });
+      unwrap(await sb.from("patients").insert(payload).select().single());
       card.style.display = "none";
       loadPatients("");
     } catch (err) {
@@ -173,15 +178,33 @@ function togglePatientForm() {
 
 // ---- patient detail ------------------------------------------------------
 async function renderPatientDetail(id) {
+  CURRENT_PATIENT = id;
   main.innerHTML = `<p class="empty">Loading record…</p>`;
-  let record;
+
+  let patient, appointments, visits, documents;
   try {
-    record = await api(`/api/patients/${id}`);
+    patient = unwrap(await sb.from("patients").select("*").eq("id", id).single());
+    [appointments, visits, documents] = await Promise.all([
+      sb.from("appointments")
+        .select("*, provider:provider_id(full_name)")
+        .eq("patient_id", id)
+        .order("scheduled_at", { ascending: false })
+        .then(unwrap),
+      sb.from("visits")
+        .select("*, provider:provider_id(full_name), prescriptions(*)")
+        .eq("patient_id", id)
+        .order("visit_date", { ascending: false })
+        .then(unwrap),
+      sb.from("documents")
+        .select("*")
+        .eq("patient_id", id)
+        .order("created_at", { ascending: false })
+        .then(unwrap),
+    ]);
   } catch (err) {
     main.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
     return;
   }
-  const { patient, appointments, visits, documents } = record;
 
   main.innerHTML = `
     <button class="back-link" id="back">← All patients</button>
@@ -246,16 +269,16 @@ async function renderPatientDetail(id) {
 
   $("save-appt").addEventListener("click", async () => {
     try {
-      await api("/api/appointments", {
-        method: "POST",
-        body: JSON.stringify({
+      if (!$("a-when").value) throw new Error("Pick a date and time.");
+      unwrap(
+        await sb.from("appointments").insert({
           patient_id: id,
           provider_id: $("a-provider").value,
           scheduled_at: new Date($("a-when").value).toISOString(),
           duration_min: Number($("a-dur").value) || 30,
           reason: $("a-reason").value.trim(),
-        }),
-      });
+        }).select().single()
+      );
       renderPatientDetail(id);
     } catch (err) {
       $("a-error").textContent = err.message;
@@ -264,15 +287,14 @@ async function renderPatientDetail(id) {
 
   $("save-visit").addEventListener("click", async () => {
     try {
-      await api("/api/visits", {
-        method: "POST",
-        body: JSON.stringify({
+      unwrap(
+        await sb.from("visits").insert({
           patient_id: id,
           provider_id: $("v-provider").value,
           diagnosis: $("v-dx").value.trim(),
           notes: $("v-notes").value.trim(),
-        }),
-      });
+        }).select().single()
+      );
       renderPatientDetail(id);
     } catch (err) {
       $("v-error").textContent = err.message;
@@ -280,6 +302,10 @@ async function renderPatientDetail(id) {
   });
 
   $("upload-doc").addEventListener("click", () => uploadDocument(id));
+}
+
+function refreshCurrentPatient() {
+  if (CURRENT_PATIENT) renderPatientDetail(CURRENT_PATIENT);
 }
 
 function renderAppointments(appts) {
@@ -304,10 +330,9 @@ function renderAppointments(appts) {
   el.querySelectorAll("select[data-appt]").forEach((sel) =>
     sel.addEventListener("change", async () => {
       try {
-        await api(`/api/appointments/${sel.dataset.appt}`, {
-          method: "PATCH",
-          body: JSON.stringify({ status: sel.value }),
-        });
+        unwrap(
+          await sb.from("appointments").update({ status: sel.value }).eq("id", sel.dataset.appt)
+        );
       } catch (err) {
         alert(err.message);
       }
@@ -360,31 +385,20 @@ function showRxForm(visitId) {
   holder.querySelector("[data-save]").addEventListener("click", async () => {
     const get = (f) => holder.querySelector(`[data-f="${f}"]`).value.trim();
     try {
-      await api("/api/prescriptions", {
-        method: "POST",
-        body: JSON.stringify({
+      if (!get("med")) throw new Error("Medication is required.");
+      unwrap(
+        await sb.from("prescriptions").insert({
           visit_id: visitId,
           medication: get("med"),
           dosage: get("dose"),
           frequency: get("freq"),
-        }),
-      });
-      refreshCurrentPatient(); // reload the detail view to show the new Rx
+        }).select().single()
+      );
+      refreshCurrentPatient();
     } catch (err) {
       holder.querySelector("[data-err]").textContent = err.message;
     }
   });
-}
-
-// remembers which patient detail is open so we can refresh after edits
-let CURRENT_PATIENT = null;
-const _origDetail = renderPatientDetail;
-renderPatientDetail = async function (id) {
-  CURRENT_PATIENT = id;
-  return _origDetail(id);
-};
-function refreshCurrentPatient() {
-  if (CURRENT_PATIENT) renderPatientDetail(CURRENT_PATIENT);
 }
 
 async function uploadDocument(patientId) {
@@ -397,10 +411,14 @@ async function uploadDocument(patientId) {
     const path = `${patientId}/${Date.now()}-${file.name}`;
     const { error: upErr } = await sb.storage.from("documents").upload(path, file);
     if (upErr) throw upErr;
-    await api("/api/documents", {
-      method: "POST",
-      body: JSON.stringify({ patient_id: patientId, file_path: path, kind: $("d-kind").value.trim() }),
-    });
+    unwrap(
+      await sb.from("documents").insert({
+        patient_id: patientId,
+        file_path: path,
+        kind: $("d-kind").value.trim(),
+        uploaded_by: CURRENT_USER,
+      }).select().single()
+    );
     renderPatientDetail(patientId);
   } catch (err) {
     errEl.textContent = err.message;
@@ -416,15 +434,18 @@ function renderDocuments(docs) {
         <div>${esc(d.file_path.split("/").pop())}
           <span class="badge">${esc(d.kind || "file")}</span>
           <div class="muted">${fmtDateTime(d.created_at)}</div></div>
-        <button class="ghost small" data-doc="${d.id}">Open</button>
+        <button class="ghost small" data-doc="${d.file_path}">Open</button>
       </div>`
     )
     .join("");
   el.querySelectorAll("button[data-doc]").forEach((btn) =>
     btn.addEventListener("click", async () => {
       try {
-        const { url } = await api(`/api/documents/${btn.dataset.doc}/url`);
-        window.open(url, "_blank");
+        const { data, error } = await sb.storage
+          .from("documents")
+          .createSignedUrl(btn.dataset.doc, 60);
+        if (error) throw error;
+        window.open(data.signedUrl, "_blank");
       } catch (err) {
         alert(err.message);
       }
