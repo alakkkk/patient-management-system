@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clinic — patient management</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- LOGIN VIEW -->
+    <div id="login-view" class="login-wrap">
+      <div class="login-card">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          <span>Northside Clinic</span>
+        </div>
+        <h1>Staff sign in</h1>
+        <p class="muted">Practice project — use test credentials only.</p>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" placeholder="nurse@clinic.test" />
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+        <button id="login-btn" class="primary">Sign in</button>
+        <p id="login-error" class="error"></p>
+      </div>
+    </div>
+
+    <!-- APP SHELL -->
+    <div id="app-view" class="hidden">
+      <header class="topbar">
+        <div class="brand" role="button" id="home-link">
+          <span class="brand-mark"></span>
+          <span>Northside Clinic</span>
+        </div>
+        <div class="topbar-right">
+          <span id="who" class="muted"></span>
+          <button id="logout-btn" class="ghost">Sign out</button>
+        </div>
+      </header>
+
+      <main id="main"></main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
