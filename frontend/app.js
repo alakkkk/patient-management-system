@@ -4,6 +4,34 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const main = $("main");
 
+// ---- icons (inline SVG, no dependencies) ---------------------------------
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
+  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  arrowLeft: '<path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>',
+};
+const icon = (name) =>
+  `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+
+(function injectIconCss() {
+  const s = document.createElement("style");
+  s.textContent = `
+    button { display:inline-flex; align-items:center; justify-content:center; gap:0.4em; }
+    .ico { width:1em; height:1em; flex:0 0 auto; }
+    .nav-link .ico { width:0.95em; height:0.95em; }
+    .back-link { gap:0.3em; }
+  `;
+  document.head.appendChild(s);
+})();
+
 // ---- helpers -------------------------------------------------------------
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -21,7 +49,27 @@ function unwrap({ data, error }) {
   return data;
 }
 
-// convert a stored ISO timestamp into a value a datetime-local input accepts
+// map common Postgres errors to friendly text
+function friendly(err, map = {}) {
+  if (err?.code === "23505") return map["23505"] || "That record already exists.";
+  if (err?.code === "23503") return map["23503"] || "That item is linked to other records.";
+  return err?.message || "Something went wrong.";
+}
+
+// disable a button + show a label while an async action runs (prevents double-submit)
+async function withBusy(btn, fn, busyLabel = "Saving…") {
+  if (!btn) return fn();
+  const prev = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = busyLabel;
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = prev;
+  }
+}
+
 function toLocalInput(iso) {
   const d = new Date(iso);
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -34,15 +82,10 @@ function todayBounds() {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-// lightweight toast for success / error feedback
 let toastTimer;
 function toast(msg, isError = false) {
   let el = $("toast");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "toast";
-    document.body.appendChild(el);
-  }
+  if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); }
   el.textContent = msg;
   el.className = isError ? "err show" : "show";
   clearTimeout(toastTimer);
@@ -60,12 +103,14 @@ $("login-btn").addEventListener("click", async () => {
   const email = $("email").value.trim();
   const password = $("password").value;
   $("login-error").textContent = "";
-  btn.disabled = true;
-  btn.textContent = "Signing in…";
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  btn.disabled = false;
-  btn.textContent = "Sign in";
-  if (error) $("login-error").textContent = error.message;
+  try {
+    await withBusy(btn, async () => {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    }, "Signing in…");
+  } catch (err) {
+    $("login-error").textContent = err.message;
+  }
 });
 
 $("logout-btn").addEventListener("click", () => sb.auth.signOut());
@@ -81,6 +126,10 @@ sb.auth.onAuthStateChange((_event, session) => {
 async function showApp() {
   $("login-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
+  // decorate the static nav/sign-out buttons with icons
+  $("nav-dashboard").innerHTML = icon("grid") + "Dashboard";
+  $("nav-patients").innerHTML = icon("users") + "Patients";
+  $("logout-btn").innerHTML = icon("logout") + "Sign out";
   try {
     const { data: { user } } = await sb.auth.getUser();
     CURRENT_USER = user.id;
@@ -123,7 +172,7 @@ function wireStatusSelects(scope, onDone) {
         toast("Status updated");
         onDone && onDone();
       } catch (err) {
-        toast(err.message, true);
+        toast(friendly(err), true);
       }
     })
   );
@@ -149,16 +198,13 @@ async function renderDashboard() {
   try {
     const { start, end } = todayBounds();
     const nowIso = new Date().toISOString();
-
     const [patientCount, todayCount, upcomingCount, schedule] = await Promise.all([
       sb.from("patients").select("id", { count: "exact", head: true }),
       sb.from("appointments").select("id", { count: "exact", head: true }).gte("scheduled_at", start).lte("scheduled_at", end),
       sb.from("appointments").select("id", { count: "exact", head: true }).eq("status", "scheduled").gte("scheduled_at", nowIso),
       sb.from("appointments")
         .select("*, patient:patient_id(id, full_name, mrn), provider:provider_id(full_name)")
-        .gte("scheduled_at", start).lte("scheduled_at", end)
-        .order("scheduled_at")
-        .then(unwrap),
+        .gte("scheduled_at", start).lte("scheduled_at", end).order("scheduled_at").then(unwrap),
     ]);
 
     $("s-patients").textContent = patientCount.count ?? 0;
@@ -202,7 +248,7 @@ async function renderPatientList() {
   main.innerHTML = `
     <div class="page-head">
       <h2>Patients</h2>
-      <button class="primary" id="new-patient-btn">+ New patient</button>
+      <button class="primary" id="new-patient-btn">${icon("plus")} New patient</button>
     </div>
     <div class="toolbar"><input id="search" type="search" placeholder="Search by name or MRN…" /></div>
     <div class="card" id="patient-form-card" style="display:none"></div>
@@ -216,13 +262,15 @@ async function renderPatientList() {
   let t;
   search.addEventListener("input", () => {
     clearTimeout(t);
-    t = setTimeout(() => loadPatients(search.value.trim()), 250);
+    t = setTimeout(() => loadPatients(search.value), 250);
   });
   loadPatients("");
 }
 
-async function loadPatients(search) {
+async function loadPatients(rawSearch) {
   const rows = $("patient-rows");
+  // FIX: strip characters that have meaning in PostgREST filters so search can't break
+  const search = String(rawSearch || "").replace(/[,()%*\\"]/g, "").trim();
   try {
     let query = sb.from("patients").select("*").order("full_name");
     if (search) query = query.or(`full_name.ilike.%${search}%,mrn.ilike.%${search}%`);
@@ -249,7 +297,6 @@ async function loadPatients(search) {
   }
 }
 
-// shared form for both "new" and "edit" patient
 function patientForm(existing = null) {
   const card = $("patient-form-card");
   if (!card) return;
@@ -266,12 +313,14 @@ function patientForm(existing = null) {
     </div>
     <p class="error" id="pf-error"></p>
     <div class="record-actions" style="margin-top:0.25rem">
-      <button class="primary" id="save-patient">${existing ? "Save changes" : "Save patient"}</button>
-      <button class="ghost" id="cancel-patient">Cancel</button>
+      <button class="primary" id="save-patient">${icon("check")} ${existing ? "Save changes" : "Save patient"}</button>
+      <button class="ghost" id="cancel-patient">${icon("x")} Cancel</button>
     </div>`;
 
   $("cancel-patient").addEventListener("click", () => (card.style.display = "none"));
   $("save-patient").addEventListener("click", async () => {
+    const errEl = $("pf-error");
+    errEl.textContent = "";
     const payload = {
       mrn: $("f-mrn").value.trim(),
       full_name: $("f-name").value.trim(),
@@ -281,21 +330,24 @@ function patientForm(existing = null) {
       address: $("f-address").value.trim(),
     };
     if (!payload.mrn || !payload.full_name)
-      return ($("pf-error").textContent = "MRN and full name are required.");
+      return (errEl.textContent = "MRN and full name are required.");
     try {
-      if (existing) {
-        unwrap(await sb.from("patients").update(payload).eq("id", existing.id));
-        toast("Patient updated");
-        renderPatientDetail(existing.id);
-      } else {
-        payload.created_by = CURRENT_USER;
-        unwrap(await sb.from("patients").insert(payload).select().single());
-        toast("Patient added");
-        card.style.display = "none";
-        loadPatients("");
-      }
+      await withBusy($("save-patient"), async () => {
+        if (existing) {
+          unwrap(await sb.from("patients").update(payload).eq("id", existing.id));
+          toast("Patient updated");
+          renderPatientDetail(existing.id);
+        } else {
+          payload.created_by = CURRENT_USER;
+          unwrap(await sb.from("patients").insert(payload).select().single());
+          toast("Patient added");
+          card.style.display = "none";
+          loadPatients("");
+        }
+      });
     } catch (err) {
-      $("pf-error").textContent = err.message;
+      // FIX: friendly message for a duplicate MRN instead of a raw Postgres error
+      errEl.textContent = friendly(err, { "23505": "That MRN already exists — use a different one." });
     }
   });
 }
@@ -322,15 +374,15 @@ async function renderPatientDetail(id) {
   }
 
   main.innerHTML = `
-    <button class="back-link" id="back">← All patients</button>
+    <button class="back-link" id="back">${icon("arrowLeft")} All patients</button>
     <div class="page-head"><h2>${esc(patient.full_name)}</h2></div>
 
     <div class="card">
       <div class="card-head">
         <h3>Details</h3>
         <div class="record-actions">
-          <button class="ghost small" id="edit-patient">Edit</button>
-          <button class="danger small" id="delete-patient">Delete</button>
+          <button class="ghost small" id="edit-patient">${icon("edit")} Edit</button>
+          <button class="danger small" id="delete-patient">${icon("trash")} Delete</button>
         </div>
       </div>
       <dl class="dl">
@@ -352,7 +404,7 @@ async function renderPatientDetail(id) {
         <div class="shrink" style="min-width:90px"><label>Minutes</label>
           <input id="a-dur" type="number" value="30" min="5" step="5" /></div>
         <div><label>Reason</label><input id="a-reason" placeholder="Follow-up, check-up…" /></div>
-        <div class="shrink"><button class="primary" id="save-appt">Book</button></div>
+        <div class="shrink"><button class="primary" id="save-appt">${icon("plus")} Book</button></div>
       </div>
       <p class="error" id="a-error"></p>
       <div id="appt-list" class="stack" style="margin-top:1rem"></div>
@@ -363,12 +415,12 @@ async function renderPatientDetail(id) {
       <div class="row">
         <div class="shrink" style="min-width:200px"><label>Provider</label>
           <select id="v-provider">${providerOptions()}</select></div>
-        <div><label>Diagnosis</label><input id="v-dx" placeholder="Optional" /></div>
+        <div><label>Diagnosis</label><input id="v-dx" placeholder="Optional if notes given" /></div>
       </div>
       <label>Notes</label>
       <textarea id="v-notes" rows="3" placeholder="Chief complaint, findings, plan…"></textarea>
       <p class="error" id="v-error"></p>
-      <button class="primary" id="save-visit" style="margin-top:0.75rem">Save visit</button>
+      <button class="primary" id="save-visit" style="margin-top:0.75rem">${icon("check")} Save visit</button>
       <div id="visit-list" class="stack" style="margin-top:1.25rem"></div>
     </div>
 
@@ -378,7 +430,7 @@ async function renderPatientDetail(id) {
         <div><label>File (lab result, scan…)</label><input id="d-file" type="file" /></div>
         <div class="shrink" style="min-width:150px"><label>Kind</label>
           <input id="d-kind" placeholder="lab_result" /></div>
-        <div class="shrink"><button class="primary" id="upload-doc">Upload</button></div>
+        <div class="shrink"><button class="primary" id="upload-doc">${icon("upload")} Upload</button></div>
       </div>
       <p class="error" id="d-error"></p>
       <div id="doc-list" class="stack" style="margin-top:1rem"></div>
@@ -392,40 +444,51 @@ async function renderPatientDetail(id) {
   renderDocuments(documents);
 
   $("save-appt").addEventListener("click", async () => {
+    const errEl = $("a-error");
+    errEl.textContent = "";
     try {
       if (!$("a-when").value) throw new Error("Pick a date and time.");
-      if (new Date($("a-when").value) < new Date())
-        throw new Error("Appointment can't be in the past.");
-      unwrap(
-        await sb.from("appointments").insert({
-          patient_id: id,
-          provider_id: $("a-provider").value,
-          scheduled_at: new Date($("a-when").value).toISOString(),
-          duration_min: Number($("a-dur").value) || 30,
-          reason: $("a-reason").value.trim(),
-        }).select().single()
-      );
-      toast("Appointment booked");
-      renderPatientDetail(id);
+      if (new Date($("a-when").value) < new Date()) throw new Error("Appointment can't be in the past.");
+      await withBusy($("save-appt"), async () => {
+        unwrap(
+          await sb.from("appointments").insert({
+            patient_id: id,
+            provider_id: $("a-provider").value,
+            scheduled_at: new Date($("a-when").value).toISOString(),
+            duration_min: Number($("a-dur").value) || 30,
+            reason: $("a-reason").value.trim(),
+          }).select().single()
+        );
+        toast("Appointment booked");
+        renderPatientDetail(id);
+      });
     } catch (err) {
-      $("a-error").textContent = err.message;
+      errEl.textContent = friendly(err);
     }
   });
 
   $("save-visit").addEventListener("click", async () => {
+    const errEl = $("v-error");
+    errEl.textContent = "";
+    const diagnosis = $("v-dx").value.trim();
+    const notes = $("v-notes").value.trim();
+    // FIX: don't save an empty visit
+    if (!diagnosis && !notes) return (errEl.textContent = "Add a diagnosis or some notes before saving.");
     try {
-      unwrap(
-        await sb.from("visits").insert({
-          patient_id: id,
-          provider_id: $("v-provider").value,
-          diagnosis: $("v-dx").value.trim(),
-          notes: $("v-notes").value.trim(),
-        }).select().single()
-      );
-      toast("Visit saved");
-      renderPatientDetail(id);
+      await withBusy($("save-visit"), async () => {
+        unwrap(
+          await sb.from("visits").insert({
+            patient_id: id,
+            provider_id: $("v-provider").value,
+            diagnosis,
+            notes,
+          }).select().single()
+        );
+        toast("Visit saved");
+        renderPatientDetail(id);
+      });
     } catch (err) {
-      $("v-error").textContent = err.message;
+      errEl.textContent = friendly(err);
     }
   });
 
@@ -440,7 +503,7 @@ async function deletePatient(patient) {
     toast("Patient deleted");
     renderPatientList();
   } catch (err) {
-    toast(err.message, true);
+    toast(friendly(err), true);
   }
 }
 
@@ -448,7 +511,7 @@ function refreshCurrentPatient() {
   if (CURRENT_PATIENT) renderPatientDetail(CURRENT_PATIENT);
 }
 
-// ---- appointments (with reschedule + delete) -----------------------------
+// ---- appointments (reschedule + delete) ----------------------------------
 function renderAppointments(patientId, appts) {
   const el = $("appt-list");
   if (!appts?.length) return (el.innerHTML = `<p class="empty">No appointments yet.</p>`);
@@ -462,8 +525,8 @@ function renderAppointments(patientId, appts) {
           </div>
           <div class="record-actions">
             ${statusSelect(a.id, a.status)}
-            <button class="ghost small" data-edit-appt="${a.id}">Edit</button>
-            <button class="danger small" data-del-appt="${a.id}">Delete</button>
+            <button class="ghost small" data-edit-appt="${a.id}">${icon("edit")} Edit</button>
+            <button class="danger small" data-del-appt="${a.id}">${icon("trash")} Delete</button>
           </div>
         </div>
         <div data-apptform="${a.id}"></div>
@@ -481,16 +544,13 @@ function renderAppointments(patientId, appts) {
         toast("Appointment deleted");
         refreshCurrentPatient();
       } catch (err) {
-        toast(err.message, true);
+        toast(friendly(err), true);
       }
     })
   );
 
   el.querySelectorAll("button[data-edit-appt]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const a = appts.find((x) => x.id === btn.dataset.editAppt);
-      showApptEdit(a);
-    })
+    btn.addEventListener("click", () => showApptEdit(appts.find((x) => x.id === btn.dataset.editAppt)))
   );
 }
 
@@ -507,29 +567,33 @@ function showApptEdit(a) {
       <div class="shrink" style="min-width:90px"><label>Minutes</label>
         <input data-f="dur" type="number" value="${a.duration_min || 30}" min="5" step="5" /></div>
       <div><label>Reason</label><input data-f="reason" value="${esc(a.reason || "")}" /></div>
-      <div class="shrink"><button class="primary small" data-save-appt>Save</button></div>
+      <div class="shrink"><button class="primary small" data-save-appt>${icon("check")} Save</button></div>
     </div>
     <p class="error" data-err></p>`;
   holder.querySelector("[data-save-appt]").addEventListener("click", async () => {
     const g = (f) => holder.querySelector(`[data-f="${f}"]`).value;
+    const errEl = holder.querySelector("[data-err]");
+    errEl.textContent = "";
     try {
-      unwrap(
-        await sb.from("appointments").update({
-          provider_id: g("prov"),
-          scheduled_at: new Date(g("when")).toISOString(),
-          duration_min: Number(g("dur")) || 30,
-          reason: g("reason").trim(),
-        }).eq("id", a.id)
-      );
-      toast("Appointment updated");
-      refreshCurrentPatient();
+      await withBusy(holder.querySelector("[data-save-appt]"), async () => {
+        unwrap(
+          await sb.from("appointments").update({
+            provider_id: g("prov"),
+            scheduled_at: new Date(g("when")).toISOString(),
+            duration_min: Number(g("dur")) || 30,
+            reason: g("reason").trim(),
+          }).eq("id", a.id)
+        );
+        toast("Appointment updated");
+        refreshCurrentPatient();
+      });
     } catch (err) {
-      holder.querySelector("[data-err]").textContent = err.message;
+      errEl.textContent = friendly(err);
     }
   });
 }
 
-// ---- visits (with delete) + prescriptions (add + delete) -----------------
+// ---- visits + prescriptions ----------------------------------------------
 function renderVisits(visits) {
   const el = $("visit-list");
   if (!visits?.length) return (el.innerHTML = `<p class="empty">No visit notes yet.</p>`);
@@ -539,7 +603,7 @@ function renderVisits(visits) {
         .map(
           (p) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center">
             <span>${esc(p.medication)}${p.dosage ? " " + esc(p.dosage) : ""}${p.frequency ? " · " + esc(p.frequency) : ""}</span>
-            <button class="danger small" data-del-rx="${p.id}">×</button></div>`
+            <button class="danger small" data-del-rx="${p.id}">${icon("trash")}</button></div>`
         )
         .join("");
       return `<div class="record">
@@ -547,13 +611,13 @@ function renderVisits(visits) {
           <strong>${fmtDateTime(v.visit_date)}</strong>
           <div class="record-actions">
             <span class="muted">${esc(v.provider?.full_name || "—")}</span>
-            <button class="danger small" data-del-visit="${v.id}">Delete</button>
+            <button class="danger small" data-del-visit="${v.id}">${icon("trash")} Delete</button>
           </div>
         </div>
         ${v.diagnosis ? `<div style="margin-top:0.35rem"><em>Dx:</em> ${esc(v.diagnosis)}</div>` : ""}
         ${v.notes ? `<div style="margin-top:0.35rem">${esc(v.notes)}</div>` : ""}
         <div class="rx">${rx ? `<div style="margin-top:0.4rem">${rx}</div>` : ""}</div>
-        <button class="ghost small" data-visit="${v.id}" style="margin-top:0.6rem">+ Add prescription</button>
+        <button class="ghost small" data-visit="${v.id}" style="margin-top:0.6rem">${icon("plus")} Add prescription</button>
         <div data-rxform="${v.id}"></div>
       </div>`;
     })
@@ -570,7 +634,7 @@ function renderVisits(visits) {
         toast("Visit deleted");
         refreshCurrentPatient();
       } catch (err) {
-        toast(err.message, true);
+        toast(friendly(err), true);
       }
     })
   );
@@ -581,7 +645,7 @@ function renderVisits(visits) {
         toast("Prescription removed");
         refreshCurrentPatient();
       } catch (err) {
-        toast(err.message, true);
+        toast(friendly(err), true);
       }
     })
   );
@@ -596,53 +660,58 @@ function showRxForm(visitId) {
       <div><label>Medication</label><input data-f="med" /></div>
       <div class="shrink" style="min-width:110px"><label>Dosage</label><input data-f="dose" placeholder="500mg" /></div>
       <div class="shrink" style="min-width:130px"><label>Frequency</label><input data-f="freq" placeholder="twice daily" /></div>
-      <div class="shrink"><button class="primary small" data-save>Add</button></div>
+      <div class="shrink"><button class="primary small" data-save>${icon("plus")} Add</button></div>
     </div>
     <p class="error" data-err></p>`;
   holder.querySelector("[data-save]").addEventListener("click", async () => {
     const get = (f) => holder.querySelector(`[data-f="${f}"]`).value.trim();
+    const errEl = holder.querySelector("[data-err]");
+    errEl.textContent = "";
+    if (!get("med")) return (errEl.textContent = "Medication is required.");
     try {
-      if (!get("med")) throw new Error("Medication is required.");
-      unwrap(
-        await sb.from("prescriptions").insert({
-          visit_id: visitId,
-          medication: get("med"),
-          dosage: get("dose"),
-          frequency: get("freq"),
-        }).select().single()
-      );
-      toast("Prescription added");
-      refreshCurrentPatient();
+      await withBusy(holder.querySelector("[data-save]"), async () => {
+        unwrap(
+          await sb.from("prescriptions").insert({
+            visit_id: visitId,
+            medication: get("med"),
+            dosage: get("dose"),
+            frequency: get("freq"),
+          }).select().single()
+        );
+        toast("Prescription added");
+        refreshCurrentPatient();
+      });
     } catch (err) {
-      holder.querySelector("[data-err]").textContent = err.message;
+      errEl.textContent = friendly(err);
     }
   });
 }
 
-// ---- documents (upload + open + delete) ----------------------------------
+// ---- documents -----------------------------------------------------------
 async function uploadDocument(patientId) {
   const file = $("d-file").files[0];
   const errEl = $("d-error");
   errEl.textContent = "";
   if (!file) return (errEl.textContent = "Choose a file first.");
-  if (file.size > 50 * 1024 * 1024)
-    return (errEl.textContent = "File is over the 50 MB free-tier limit.");
+  if (file.size > 50 * 1024 * 1024) return (errEl.textContent = "File is over the 50 MB free-tier limit.");
   try {
-    const path = `${patientId}/${Date.now()}-${file.name}`;
-    const { error: upErr } = await sb.storage.from("documents").upload(path, file);
-    if (upErr) throw upErr;
-    unwrap(
-      await sb.from("documents").insert({
-        patient_id: patientId,
-        file_path: path,
-        kind: $("d-kind").value.trim(),
-        uploaded_by: CURRENT_USER,
-      }).select().single()
-    );
-    toast("File uploaded");
-    renderPatientDetail(patientId);
+    await withBusy($("upload-doc"), async () => {
+      const path = `${patientId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await sb.storage.from("documents").upload(path, file);
+      if (upErr) throw upErr;
+      unwrap(
+        await sb.from("documents").insert({
+          patient_id: patientId,
+          file_path: path,
+          kind: $("d-kind").value.trim(),
+          uploaded_by: CURRENT_USER,
+        }).select().single()
+      );
+      toast("File uploaded");
+      renderPatientDetail(patientId);
+    }, "Uploading…");
   } catch (err) {
-    errEl.textContent = err.message;
+    errEl.textContent = friendly(err);
   }
 }
 
@@ -656,8 +725,8 @@ function renderDocuments(docs) {
           <span class="badge">${esc(d.kind || "file")}</span>
           <div class="muted">${fmtDateTime(d.created_at)}</div></div>
         <div class="record-actions">
-          <button class="ghost small" data-open="${esc(d.file_path)}">Open</button>
-          <button class="danger small" data-del-doc="${d.id}" data-path="${esc(d.file_path)}">Delete</button>
+          <button class="ghost small" data-open="${esc(d.file_path)}">${icon("external")} Open</button>
+          <button class="danger small" data-del-doc="${d.id}" data-path="${esc(d.file_path)}">${icon("trash")} Delete</button>
         </div>
       </div>`
     )
@@ -670,7 +739,7 @@ function renderDocuments(docs) {
         if (error) throw error;
         window.open(data.signedUrl, "_blank");
       } catch (err) {
-        toast(err.message, true);
+        toast(friendly(err), true);
       }
     })
   );
@@ -679,12 +748,12 @@ function renderDocuments(docs) {
     btn.addEventListener("click", async () => {
       if (!confirm("Delete this document?")) return;
       try {
-        await sb.storage.from("documents").remove([btn.dataset.path]); // remove the file
-        unwrap(await sb.from("documents").delete().eq("id", btn.dataset.delDoc)); // remove the row
+        await sb.storage.from("documents").remove([btn.dataset.path]);
+        unwrap(await sb.from("documents").delete().eq("id", btn.dataset.delDoc));
         toast("Document deleted");
         refreshCurrentPatient();
       } catch (err) {
-        toast(err.message, true);
+        toast(friendly(err), true);
       }
     })
   );
