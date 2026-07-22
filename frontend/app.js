@@ -71,6 +71,26 @@ const icon = (name) =>
     .modal-actions { display:flex; gap:.6rem; justify-content:flex-end; }
     .btn-danger-solid { background:var(--danger); color:#fff; border:1px solid var(--danger); }
     .btn-danger-solid:hover { background:#9a2b24; }
+
+    /* --- responsive / mobile --- */
+    @media (max-width: 760px) {
+      .topbar { flex-wrap: wrap; row-gap: 0.5rem; padding: 0.6rem 1rem; }
+      .topbar-left { gap: 1rem; }
+      #main { padding: 1.1rem 0.9rem 3rem; }
+      .page-head h2 { font-size: 1.3rem; }
+      .card { overflow-x: auto; }              /* wide tables scroll within the card */
+      .card table { min-width: 480px; }
+      .row > * { flex-basis: 100%; min-width: 0; }  /* form fields stack full-width */
+      .record-actions { flex-wrap: wrap; }
+      .modal-box { max-width: none; }
+    }
+    @media (max-width: 480px) {
+      #who { display: none; }                  /* free space; name is still in the profile */
+      .topbar-right { gap: 0.5rem; }
+      .nav-link { padding: 0.35rem 0.5rem; font-size: 0.85rem; }
+      .stat .num { font-size: 1.7rem; }
+      .page-head { gap: 0.5rem; }
+    }
   `;
   document.head.appendChild(s);
 })();
