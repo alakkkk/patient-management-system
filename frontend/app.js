@@ -59,6 +59,10 @@ const icon = (name) =>
     .record.status-cancelled { border-left:3px solid var(--danger); }
     .record.status-no_show { border-left:3px solid #8a5a12; }
 
+    /* allergy highlight chip */
+    .allergy-flag { background:var(--warn-soft); color:#8a5a12; font-weight:600;
+      padding:0.1rem 0.55rem; border-radius:6px; font-size:0.85rem; }
+
     /* confirm modal */
     .modal-overlay { position:fixed; inset:0; background:rgba(23,38,46,.45);
       display:none; align-items:center; justify-content:center; z-index:50; padding:1rem; }
@@ -106,6 +110,15 @@ const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—";
 const fmtTime = (d) =>
   d ? new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+
+function age(dob) {
+  if (!dob) return null;
+  const b = new Date(dob), now = new Date();
+  let a = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--;
+  return a >= 0 ? a : null;
+}
 
 function unwrap({ data, error }) {
   if (error) throw error;
@@ -536,6 +549,21 @@ function patientForm(existing = null) {
       <div><label>Phone</label><input id="f-phone" value="${esc(existing?.phone || "")}" /></div>
       <div><label>Email</label><input id="f-email" type="email" value="${esc(existing?.email || "")}" /></div>
       <div><label>Address</label><input id="f-address" value="${esc(existing?.address || "")}" /></div>
+      <div><label>Gender</label>
+        <select id="f-gender">
+          <option value="" ${!existing?.gender ? "selected" : ""}>—</option>
+          <option ${existing?.gender === "Female" ? "selected" : ""}>Female</option>
+          <option ${existing?.gender === "Male" ? "selected" : ""}>Male</option>
+          <option ${existing?.gender === "Other" ? "selected" : ""}>Other</option>
+          <option ${existing?.gender === "Prefer not to say" ? "selected" : ""}>Prefer not to say</option>
+        </select></div>
+      <div><label>Blood type</label>
+        <select id="f-blood">
+          <option value="" ${!existing?.blood_type ? "selected" : ""}>—</option>
+          ${["A+","A-","B+","B-","AB+","AB-","O+","O-"].map((bt) => `<option ${existing?.blood_type === bt ? "selected" : ""}>${bt}</option>`).join("")}
+        </select></div>
+      <div><label>Allergies</label><input id="f-allergies" value="${esc(existing?.allergies || "")}" placeholder="e.g. Penicillin" /></div>
+      <div><label>Emergency contact</label><input id="f-emergency" value="${esc(existing?.emergency_contact || "")}" placeholder="Name & phone" /></div>
     </div>
     <p class="error" id="pf-error"></p>
     <div class="record-actions" style="margin-top:0.25rem">
@@ -556,6 +584,10 @@ function patientForm(existing = null) {
       phone: $("f-phone").value.trim(),
       email: $("f-email").value.trim(),
       address: $("f-address").value.trim(),
+      gender: $("f-gender").value || null,
+      blood_type: $("f-blood").value || null,
+      allergies: $("f-allergies").value.trim(),
+      emergency_contact: $("f-emergency").value.trim(),
     };
     if (!payload.mrn || !payload.full_name)
       return (errEl.textContent = "MRN and full name are required.");
@@ -600,6 +632,7 @@ async function renderPatientDetail(id) {
     return;
   }
 
+  const yrs = age(patient.dob);
   main.innerHTML = `
     <button class="back-link" id="back">${icon("arrowLeft")} All patients</button>
     <div class="page-head"><h2>${esc(patient.full_name)}</h2></div>
@@ -614,7 +647,11 @@ async function renderPatientDetail(id) {
       </div>
       <dl class="dl">
         <dt>MRN</dt><dd class="mono">${esc(patient.mrn)}</dd>
-        <dt>Date of birth</dt><dd>${fmtDate(patient.dob)}</dd>
+        <dt>Date of birth</dt><dd>${fmtDate(patient.dob)}${yrs != null ? ` · ${yrs} yrs` : ""}</dd>
+        <dt>Gender</dt><dd>${esc(patient.gender || "—")}</dd>
+        <dt>Blood type</dt><dd>${esc(patient.blood_type || "—")}</dd>
+        <dt>Allergies</dt><dd>${patient.allergies ? `<span class="allergy-flag">${esc(patient.allergies)}</span>` : "—"}</dd>
+        <dt>Emergency contact</dt><dd>${esc(patient.emergency_contact || "—")}</dd>
         <dt>Phone</dt><dd>${esc(patient.phone || "—")}</dd>
         <dt>Email</dt><dd>${esc(patient.email || "—")}</dd>
         <dt>Address</dt><dd>${esc(patient.address || "—")}</dd>
