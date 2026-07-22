@@ -433,7 +433,18 @@ async function renderDashboard() {
     <div class="card">
       <div class="card-head"><h3>Today's schedule</h3></div>
       <div id="schedule"><table><tbody>${skeletonRows(4, 5)}</tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Notice board</h3></div>
+      <div class="row" style="align-items:flex-end">
+        <textarea id="note-input" rows="2" placeholder="Add a note for the team… (e.g. Dr. Lee out Friday)"></textarea>
+        <div class="shrink"><button class="primary" id="add-note">${icon("plus")} Add</button></div>
+      </div>
+      <p class="error" id="note-error"></p>
+      <div id="note-list" class="stack" style="margin-top:0.75rem"><p class="empty">Loading…</p></div>
     </div>`;
+
+  wireNotes();
 
   try {
     const { start, end } = todayBounds();
@@ -476,6 +487,69 @@ async function renderDashboard() {
     wireStatusSelects(el, renderDashboard);
   } catch (err) {
     main.innerHTML += `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+// ---- dashboard notice board ----------------------------------------------
+function wireNotes() {
+  const btn = $("add-note");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const input = $("note-input");
+    const errEl = $("note-error");
+    errEl.textContent = "";
+    const body = input.value.trim();
+    if (!body) return (errEl.textContent = "Write something first.");
+    try {
+      await withBusy(btn, async () => {
+        unwrap(await sb.from("notes").insert({ body, created_by: CURRENT_USER }).select().single());
+        input.value = "";
+        toast("Note added");
+        loadNotes();
+      }, "Adding…");
+    } catch (err) {
+      errEl.textContent = friendly(err);
+    }
+  });
+  loadNotes();
+}
+
+async function loadNotes() {
+  const el = $("note-list");
+  if (!el) return;
+  try {
+    const notes = unwrap(
+      await sb.from("notes").select("*, author:created_by(full_name)").order("created_at", { ascending: false })
+    );
+    if (!notes.length) {
+      el.innerHTML = emptyState("clipboard", "No notes yet", "Post the first note for the team.");
+      return;
+    }
+    el.innerHTML = notes
+      .map(
+        (n) => `<div class="record" style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start">
+          <div>
+            <div style="white-space:pre-wrap">${esc(n.body)}</div>
+            <div class="muted">${esc(n.author?.full_name || "Staff")} · ${fmtDateTime(n.created_at)}</div>
+          </div>
+          <button class="danger small" data-del-note="${n.id}">${icon("trash")}</button>
+        </div>`
+      )
+      .join("");
+    el.querySelectorAll("button[data-del-note]").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!(await confirmDialog("Delete this note?"))) return;
+        try {
+          unwrap(await sb.from("notes").delete().eq("id", btn.dataset.delNote));
+          toast("Note deleted");
+          loadNotes();
+        } catch (err) {
+          toast(friendly(err), true);
+        }
+      })
+    );
+  } catch (err) {
+    el.innerHTML = `<p class="error">${esc(err.message)}</p>`;
   }
 }
 
