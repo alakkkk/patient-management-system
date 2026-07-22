@@ -51,6 +51,26 @@ const icon = (name) =>
     .empty-state .ico { width:32px; height:32px; opacity:.4; margin-bottom:.35rem; }
     .empty-state-title { font-weight:600; color:var(--ink); margin:.2rem 0 0; }
     .empty-state-sub { color:var(--ink-soft); font-size:.85rem; margin:.25rem 0 0; }
+
+    /* status-colored appointment accents */
+    .record.status-scheduled { border-left:3px solid var(--accent); }
+    .record.status-checked_in { border-left:3px solid #1d4e89; }
+    .record.status-completed { border-left:3px solid #2f6b3a; }
+    .record.status-cancelled { border-left:3px solid var(--danger); }
+    .record.status-no_show { border-left:3px solid #8a5a12; }
+
+    /* confirm modal */
+    .modal-overlay { position:fixed; inset:0; background:rgba(23,38,46,.45);
+      display:none; align-items:center; justify-content:center; z-index:50; padding:1rem; }
+    .modal-overlay.show { display:flex; animation: mFade .15s ease; }
+    .modal-box { background:var(--surface); border-radius:14px; box-shadow:var(--shadow-lift);
+      padding:1.5rem; max-width:400px; width:100%; animation: mPop .16s ease; }
+    @keyframes mFade { from { opacity:0; } to { opacity:1; } }
+    @keyframes mPop { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:none; } }
+    .modal-message { margin:0 0 1.25rem; font-size:.95rem; color:var(--ink); line-height:1.5; }
+    .modal-actions { display:flex; gap:.6rem; justify-content:flex-end; }
+    .btn-danger-solid { background:var(--danger); color:#fff; border:1px solid var(--danger); }
+    .btn-danger-solid:hover { background:#9a2b24; }
   `;
   document.head.appendChild(s);
 })();
@@ -134,6 +154,71 @@ function emptyState(iconName, title, sub) {
     ${sub ? `<p class="empty-state-sub">${esc(sub)}</p>` : ""}</div>`;
 }
 
+// ---- custom confirm modal (replaces the browser's confirm popup) ---------
+function confirmDialog(message, opts = {}) {
+  const { confirmLabel = "Delete", cancelLabel = "Cancel", danger = true } = opts;
+  return new Promise((resolve) => {
+    let modal = $("modal-overlay");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "modal-overlay";
+      modal.className = "modal-overlay";
+      modal.innerHTML = `
+        <div class="modal-box">
+          <p id="modal-message" class="modal-message"></p>
+          <div class="modal-actions">
+            <button id="modal-cancel" class="ghost"></button>
+            <button id="modal-ok"></button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+    const ok = $("modal-ok");
+    const cancel = $("modal-cancel");
+    $("modal-message").textContent = message;
+    ok.textContent = confirmLabel;
+    cancel.textContent = cancelLabel;
+    ok.className = danger ? "btn-danger-solid" : "primary";
+    modal.classList.add("show");
+    ok.focus();
+
+    const close = (val) => {
+      modal.classList.remove("show");
+      ok.onclick = cancel.onclick = modal.onclick = null;
+      document.removeEventListener("keydown", onKey);
+      resolve(val);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") close(false);
+      else if (e.key === "Enter") close(true);
+    };
+    ok.onclick = () => close(true);
+    cancel.onclick = () => close(false);
+    modal.onclick = (e) => { if (e.target === modal) close(false); };
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+// ---- keyboard: Enter submits, Escape closes ------------------------------
+function wireFormKeys(scope, submitFn, escapeFn) {
+  scope.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+      e.preventDefault();
+      submitFn && submitFn();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      escapeFn && escapeFn();
+    }
+  });
+}
+
+["email", "password"].forEach((id) =>
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") $("login-btn").click(); })
+);
+["new-password", "confirm-password"].forEach((id) =>
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") $("setpw-btn").click(); })
+);
+
 const STATUSES = ["scheduled", "checked_in", "completed", "cancelled", "no_show"];
 let PROVIDERS = [];
 let CURRENT_USER = null;
@@ -194,6 +279,7 @@ function showSetPassword(session) {
   $("setpw-view").classList.remove("hidden");
   const email = session?.user?.email;
   $("setpw-email").textContent = email ? `Setting up ${email}` : "Finish creating your account.";
+  setTimeout(() => $("new-password")?.focus(), 0);
 }
 
 // shown when a logged-in user clicks "Change password"
@@ -208,6 +294,7 @@ function openChangePassword() {
   $("app-view").classList.add("hidden");
   $("login-view").classList.add("hidden");
   $("setpw-view").classList.remove("hidden");
+  setTimeout(() => $("new-password")?.focus(), 0);
 }
 
 $("setpw-cancel").addEventListener("click", async () => {
@@ -266,6 +353,7 @@ function showLogin() {
   $("app-view").classList.add("hidden");
   $("setpw-view").classList.add("hidden");
   $("login-view").classList.remove("hidden");
+  setTimeout(() => $("email")?.focus(), 0);
 }
 
 function setActiveNav(which) {
@@ -436,6 +524,8 @@ function patientForm(existing = null) {
     </div>`;
 
   $("cancel-patient").addEventListener("click", () => (card.style.display = "none"));
+  setTimeout(() => $("f-mrn")?.focus(), 0);
+  wireFormKeys(card, () => $("save-patient").click(), () => (card.style.display = "none"));
   $("save-patient").addEventListener("click", async () => {
     const errEl = $("pf-error");
     errEl.textContent = "";
@@ -612,7 +702,7 @@ async function renderPatientDetail(id) {
 }
 
 async function deletePatient(patient) {
-  if (!confirm(`Delete ${patient.full_name} and all their appointments, visits, and documents? This cannot be undone.`))
+  if (!(await confirmDialog(`Delete ${patient.full_name} and all their appointments, visits, and documents? This cannot be undone.`, { confirmLabel: "Delete patient" })))
     return;
   try {
     unwrap(await sb.from("patients").delete().eq("id", patient.id));
@@ -633,7 +723,7 @@ function renderAppointments(patientId, appts) {
   if (!appts?.length) return (el.innerHTML = emptyState("calendar", "No appointments yet"));
   el.innerHTML = appts
     .map(
-      (a) => `<div class="record" data-appt-row="${a.id}">
+      (a) => `<div class="record status-${a.status}" data-appt-row="${a.id}">
         <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap">
           <div>
             <strong>${fmtDateTime(a.scheduled_at)}</strong> · ${esc(a.provider?.full_name || "—")}
@@ -654,7 +744,7 @@ function renderAppointments(patientId, appts) {
 
   el.querySelectorAll("button[data-del-appt]").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete this appointment?")) return;
+      if (!(await confirmDialog("Delete this appointment?"))) return;
       try {
         unwrap(await sb.from("appointments").delete().eq("id", btn.dataset.delAppt));
         toast("Appointment deleted");
@@ -686,6 +776,8 @@ function showApptEdit(a) {
       <div class="shrink"><button class="primary small" data-save-appt>${icon("check")} Save</button></div>
     </div>
     <p class="error" data-err></p>`;
+  setTimeout(() => holder.querySelector('[data-f="when"]')?.focus(), 0);
+  wireFormKeys(holder, () => holder.querySelector("[data-save-appt]").click(), () => { holder.innerHTML = ""; delete holder.dataset.open; });
   holder.querySelector("[data-save-appt]").addEventListener("click", async () => {
     const g = (f) => holder.querySelector(`[data-f="${f}"]`).value;
     const errEl = holder.querySelector("[data-err]");
@@ -744,7 +836,7 @@ function renderVisits(visits) {
   );
   el.querySelectorAll("button[data-del-visit]").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete this visit note and its prescriptions?")) return;
+      if (!(await confirmDialog("Delete this visit note and its prescriptions?"))) return;
       try {
         unwrap(await sb.from("visits").delete().eq("id", btn.dataset.delVisit));
         toast("Visit deleted");
@@ -779,6 +871,8 @@ function showRxForm(visitId) {
       <div class="shrink"><button class="primary small" data-save>${icon("plus")} Add</button></div>
     </div>
     <p class="error" data-err></p>`;
+  setTimeout(() => holder.querySelector('[data-f="med"]')?.focus(), 0);
+  wireFormKeys(holder, () => holder.querySelector("[data-save]").click(), () => { holder.innerHTML = ""; delete holder.dataset.open; });
   holder.querySelector("[data-save]").addEventListener("click", async () => {
     const get = (f) => holder.querySelector(`[data-f="${f}"]`).value.trim();
     const errEl = holder.querySelector("[data-err]");
@@ -862,7 +956,7 @@ function renderDocuments(docs) {
 
   el.querySelectorAll("button[data-del-doc]").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete this document?")) return;
+      if (!(await confirmDialog("Delete this document?"))) return;
       try {
         await sb.storage.from("documents").remove([btn.dataset.path]);
         unwrap(await sb.from("documents").delete().eq("id", btn.dataset.delDoc));
