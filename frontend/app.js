@@ -18,17 +18,39 @@ const ICONS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   arrowLeft: '<path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
 };
 const icon = (name) =>
   `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
-(function injectIconCss() {
+(function injectPolishCss() {
   const s = document.createElement("style");
   s.textContent = `
     button { display:inline-flex; align-items:center; justify-content:center; gap:0.4em; }
     .ico { width:1em; height:1em; flex:0 0 auto; }
     .nav-link .ico { width:0.95em; height:0.95em; }
     .back-link { gap:0.3em; }
+
+    /* view fade-in */
+    .view-enter { animation: viewIn .22s ease; }
+    @keyframes viewIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+
+    /* skeleton loaders */
+    .skeleton { display:block; border-radius:6px;
+      background:linear-gradient(90deg,#e9efee 25%,#f4f8f7 37%,#e9efee 63%);
+      background-size:400% 100%; animation:shimmer 1.3s ease infinite; }
+    @keyframes shimmer { from { background-position:100% 0; } to { background-position:0 0; } }
+    .skeleton-line { height:12px; width:100%; }
+    .skeleton-num { height:30px; width:52px; }
+    .sk-card { height:120px; border-radius:12px; margin-bottom:1.25rem; }
+
+    /* empty states */
+    .empty-state { text-align:center; padding:2.25rem 1rem; }
+    .empty-state .ico { width:32px; height:32px; opacity:.4; margin-bottom:.35rem; }
+    .empty-state-title { font-weight:600; color:var(--ink); margin:.2rem 0 0; }
+    .empty-state-sub { color:var(--ink-soft); font-size:.85rem; margin:.25rem 0 0; }
   `;
   document.head.appendChild(s);
 })();
@@ -89,6 +111,27 @@ function toast(msg, isError = false) {
   el.className = isError ? "err show" : "show";
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.className = el.className.replace("show", "").trim()), 2600);
+}
+
+// ---- polish: fade-in on view swap, skeletons, empty states ---------------
+new MutationObserver(() => {
+  main.classList.remove("view-enter");
+  void main.offsetWidth; // restart the animation
+  main.classList.add("view-enter");
+}).observe(main, { childList: true });
+
+const skeletonRows = (n = 5, cols = 4) =>
+  Array.from({ length: n }, () =>
+    `<tr class="norow"><td colspan="${cols}"><span class="skeleton skeleton-line"></span></td></tr>`
+  ).join("");
+
+const skeletonCards = (n = 3) =>
+  Array.from({ length: n }, () => `<div class="skeleton sk-card"></div>`).join("");
+
+function emptyState(iconName, title, sub) {
+  return `<div class="empty-state">${icon(iconName)}
+    <p class="empty-state-title">${esc(title)}</p>
+    ${sub ? `<p class="empty-state-sub">${esc(sub)}</p>` : ""}</div>`;
 }
 
 const STATUSES = ["scheduled", "checked_in", "completed", "cancelled", "no_show"];
@@ -262,13 +305,13 @@ async function renderDashboard() {
   setActiveNav("dashboard");
   main.innerHTML = `<div class="page-head"><h2>Dashboard</h2></div>
     <div class="stat-grid">
-      <div class="stat"><div class="num" id="s-patients">—</div><div class="lbl">Total patients</div></div>
-      <div class="stat"><div class="num" id="s-today">—</div><div class="lbl">Appointments today</div></div>
-      <div class="stat"><div class="num" id="s-upcoming">—</div><div class="lbl">Upcoming (scheduled)</div></div>
+      <div class="stat"><div class="num" id="s-patients"><span class="skeleton skeleton-num"></span></div><div class="lbl">Total patients</div></div>
+      <div class="stat"><div class="num" id="s-today"><span class="skeleton skeleton-num"></span></div><div class="lbl">Appointments today</div></div>
+      <div class="stat"><div class="num" id="s-upcoming"><span class="skeleton skeleton-num"></span></div><div class="lbl">Upcoming (scheduled)</div></div>
     </div>
     <div class="card">
       <div class="card-head"><h3>Today's schedule</h3></div>
-      <div id="schedule"><p class="empty">Loading…</p></div>
+      <div id="schedule"><table><tbody>${skeletonRows(4, 5)}</tbody></table></div>
     </div>`;
 
   try {
@@ -289,7 +332,7 @@ async function renderDashboard() {
 
     const el = $("schedule");
     if (!schedule.length) {
-      el.innerHTML = `<p class="empty">No appointments scheduled for today.</p>`;
+      el.innerHTML = emptyState("calendar", "No appointments today", "Booked appointments for today will show up here.");
       return;
     }
     el.innerHTML = `<table>
@@ -330,7 +373,7 @@ async function renderPatientList() {
     <div class="card" id="patient-form-card" style="display:none"></div>
     <div class="card"><table>
       <thead><tr><th>MRN</th><th>Name</th><th>DOB</th><th>Phone</th></tr></thead>
-      <tbody id="patient-rows"><tr class="norow"><td colspan="4" class="empty">Loading…</td></tr></tbody>
+      <tbody id="patient-rows">${skeletonRows(5, 4)}</tbody>
     </table></div>`;
 
   $("new-patient-btn").addEventListener("click", () => patientForm());
@@ -351,7 +394,7 @@ async function loadPatients(rawSearch) {
     if (search) query = query.or(`full_name.ilike.%${search}%,mrn.ilike.%${search}%`);
     const patients = unwrap(await query);
     if (!patients.length) {
-      rows.innerHTML = `<tr class="norow"><td colspan="4" class="empty">No patients found.</td></tr>`;
+      rows.innerHTML = `<tr class="norow"><td colspan="4">${emptyState("users", "No patients found", "Try a different search, or add a new patient.")}</td></tr>`;
       return;
     }
     rows.innerHTML = patients
@@ -432,7 +475,7 @@ function patientForm(existing = null) {
 async function renderPatientDetail(id) {
   CURRENT_PATIENT = id;
   setActiveNav("patients");
-  main.innerHTML = `<p class="empty">Loading record…</p>`;
+  main.innerHTML = `<div style="height:18px"></div>${skeletonCards(3)}`;
 
   let patient, appointments, visits, documents;
   try {
@@ -587,7 +630,7 @@ function refreshCurrentPatient() {
 // ---- appointments (reschedule + delete) ----------------------------------
 function renderAppointments(patientId, appts) {
   const el = $("appt-list");
-  if (!appts?.length) return (el.innerHTML = `<p class="empty">No appointments yet.</p>`);
+  if (!appts?.length) return (el.innerHTML = emptyState("calendar", "No appointments yet"));
   el.innerHTML = appts
     .map(
       (a) => `<div class="record" data-appt-row="${a.id}">
@@ -669,7 +712,7 @@ function showApptEdit(a) {
 // ---- visits + prescriptions ----------------------------------------------
 function renderVisits(visits) {
   const el = $("visit-list");
-  if (!visits?.length) return (el.innerHTML = `<p class="empty">No visit notes yet.</p>`);
+  if (!visits?.length) return (el.innerHTML = emptyState("clipboard", "No visit notes yet"));
   el.innerHTML = visits
     .map((v) => {
       const rx = (v.prescriptions || [])
@@ -790,7 +833,7 @@ async function uploadDocument(patientId) {
 
 function renderDocuments(docs) {
   const el = $("doc-list");
-  if (!docs?.length) return (el.innerHTML = `<p class="empty">No documents uploaded.</p>`);
+  if (!docs?.length) return (el.innerHTML = emptyState("file", "No documents uploaded"));
   el.innerHTML = docs
     .map(
       (d) => `<div class="record" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
