@@ -20,13 +20,11 @@
           <span class="brand-mark"></span>
           <span>Northside Clinic</span>
         </div>
-
         <figure class="quote">
           <!-- Swap this line for any quote you like -->
           <blockquote>Everybody lies.</blockquote>
-          <figcaption>— Dr. Gregory House, <cite>House M.D.</cite></figcaption>
+          <figcaption>— Dr. Gregory House, House M.D.</figcaption>
         </figure>
-
         <p class="aside-foot">Patient management system</p>
       </aside>
 
@@ -37,9 +35,38 @@
           <label for="email">Email</label>
           <input id="email" type="email" autocomplete="username" placeholder="nurse@clinic.test" />
           <label for="password">Password</label>
-          <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+          <input id="password" type="password" autocomplete="current-password" placeholder="password" />
           <button id="login-btn" class="primary">Sign in</button>
           <p id="login-error" class="error"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SET / CHANGE PASSWORD VIEW -->
+    <div id="setpw-view" class="login-split hidden">
+      <aside class="login-aside">
+        <div class="brand brand-light">
+          <span class="brand-mark"></span>
+          <span>Northside Clinic</span>
+        </div>
+        <figure class="quote">
+          <blockquote>Welcome aboard.</blockquote>
+          <figcaption>Choose a password to secure your account.</figcaption>
+        </figure>
+        <p class="aside-foot">Patient management system</p>
+      </aside>
+
+      <div class="login-main">
+        <div class="login-card">
+          <h1 id="setpw-title">Choose a password</h1>
+          <p class="muted" id="setpw-email">Finish creating your staff account.</p>
+          <label for="new-password">New password</label>
+          <input id="new-password" type="password" autocomplete="new-password" placeholder="At least 6 characters" />
+          <label for="confirm-password">Confirm password</label>
+          <input id="confirm-password" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+          <button id="setpw-btn" class="primary">Save password &amp; continue</button>
+          <button id="setpw-cancel" class="ghost hidden" style="width:100%;margin-top:0.5rem">Cancel</button>
+          <p id="setpw-error" class="error"></p>
         </div>
       </div>
     </div>
@@ -59,6 +86,7 @@
         </div>
         <div class="topbar-right">
           <span id="who" class="muted"></span>
+          <button id="change-pw-btn" class="ghost">Change password</button>
           <button id="logout-btn" class="ghost">Sign out</button>
         </div>
       </header>

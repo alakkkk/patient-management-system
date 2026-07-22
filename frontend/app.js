@@ -16,6 +16,7 @@ const ICONS = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   arrowLeft: '<path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>',
 };
 const icon = (name) =>
@@ -49,14 +50,12 @@ function unwrap({ data, error }) {
   return data;
 }
 
-// map common Postgres errors to friendly text
 function friendly(err, map = {}) {
   if (err?.code === "23505") return map["23505"] || "That record already exists.";
   if (err?.code === "23503") return map["23503"] || "That item is linked to other records.";
   return err?.message || "Something went wrong.";
 }
 
-// disable a button + show a label while an async action runs (prevents double-submit)
 async function withBusy(btn, fn, busyLabel = "Saving…") {
   if (!btn) return fn();
   const prev = btn.innerHTML;
@@ -96,6 +95,7 @@ const STATUSES = ["scheduled", "checked_in", "completed", "cancelled", "no_show"
 let PROVIDERS = [];
 let CURRENT_USER = null;
 let CURRENT_PATIENT = null;
+let awaitingPasswordSet = false;
 
 // ---- auth ----------------------------------------------------------------
 $("login-btn").addEventListener("click", async () => {
@@ -117,18 +117,93 @@ $("logout-btn").addEventListener("click", () => sb.auth.signOut());
 $("home-link").addEventListener("click", renderDashboard);
 $("nav-dashboard").addEventListener("click", renderDashboard);
 $("nav-patients").addEventListener("click", renderPatientList);
+$("change-pw-btn").addEventListener("click", openChangePassword);
 
+// main auth router (skips while an invited/changing user is on the password screen)
 sb.auth.onAuthStateChange((_event, session) => {
+  if (awaitingPasswordSet || isInviteLink()) return;
   if (session) showApp();
   else showLogin();
 });
 
+// ---- invite / change-password flow ---------------------------------------
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && isInviteLink())) {
+    awaitingPasswordSet = true;
+    showSetPassword(session);
+  }
+});
+
+function isInviteLink() {
+  const hash = window.location.hash || "";
+  return hash.includes("type=invite") || hash.includes("type=recovery");
+}
+
+// shown when a user arrives via an invite / recovery email
+function showSetPassword(session) {
+  $("setpw-title").textContent = "Choose a password";
+  $("setpw-cancel").classList.add("hidden");
+  $("new-password").value = "";
+  $("confirm-password").value = "";
+  $("setpw-error").textContent = "";
+  $("login-view").classList.add("hidden");
+  $("app-view").classList.add("hidden");
+  $("setpw-view").classList.remove("hidden");
+  const email = session?.user?.email;
+  $("setpw-email").textContent = email ? `Setting up ${email}` : "Finish creating your account.";
+}
+
+// shown when a logged-in user clicks "Change password"
+function openChangePassword() {
+  awaitingPasswordSet = true;
+  $("setpw-title").textContent = "Change your password";
+  $("setpw-email").textContent = "Enter a new password below.";
+  $("new-password").value = "";
+  $("confirm-password").value = "";
+  $("setpw-error").textContent = "";
+  $("setpw-cancel").classList.remove("hidden");
+  $("app-view").classList.add("hidden");
+  $("login-view").classList.add("hidden");
+  $("setpw-view").classList.remove("hidden");
+}
+
+$("setpw-cancel").addEventListener("click", async () => {
+  awaitingPasswordSet = false;
+  $("setpw-view").classList.add("hidden");
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) showApp();
+  else showLogin();
+});
+
+$("setpw-btn").addEventListener("click", async () => {
+  const errEl = $("setpw-error");
+  errEl.textContent = "";
+  const pw = $("new-password").value;
+  const confirm = $("confirm-password").value;
+  if (pw.length < 6) return (errEl.textContent = "Password must be at least 6 characters.");
+  if (pw !== confirm) return (errEl.textContent = "Passwords don't match.");
+  try {
+    await withBusy($("setpw-btn"), async () => {
+      const { error } = await sb.auth.updateUser({ password: pw });
+      if (error) throw error;
+      awaitingPasswordSet = false;
+      history.replaceState(null, "", window.location.pathname); // strip token from URL
+      $("setpw-view").classList.add("hidden");
+      toast("Password updated");
+      showApp();
+    }, "Saving…");
+  } catch (err) {
+    errEl.textContent = err.message;
+  }
+});
+
 async function showApp() {
   $("login-view").classList.add("hidden");
+  $("setpw-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
-  // decorate the static nav/sign-out buttons with icons
   $("nav-dashboard").innerHTML = icon("grid") + "Dashboard";
   $("nav-patients").innerHTML = icon("users") + "Patients";
+  $("change-pw-btn").innerHTML = icon("key") + "Change password";
   $("logout-btn").innerHTML = icon("logout") + "Sign out";
   try {
     const { data: { user } } = await sb.auth.getUser();
@@ -146,6 +221,7 @@ async function showApp() {
 
 function showLogin() {
   $("app-view").classList.add("hidden");
+  $("setpw-view").classList.add("hidden");
   $("login-view").classList.remove("hidden");
 }
 
@@ -269,7 +345,6 @@ async function renderPatientList() {
 
 async function loadPatients(rawSearch) {
   const rows = $("patient-rows");
-  // FIX: strip characters that have meaning in PostgREST filters so search can't break
   const search = String(rawSearch || "").replace(/[,()%*\\"]/g, "").trim();
   try {
     let query = sb.from("patients").select("*").order("full_name");
@@ -346,7 +421,6 @@ function patientForm(existing = null) {
         }
       });
     } catch (err) {
-      // FIX: friendly message for a duplicate MRN instead of a raw Postgres error
       errEl.textContent = friendly(err, { "23505": "That MRN already exists — use a different one." });
     }
   });
@@ -472,7 +546,6 @@ async function renderPatientDetail(id) {
     errEl.textContent = "";
     const diagnosis = $("v-dx").value.trim();
     const notes = $("v-notes").value.trim();
-    // FIX: don't save an empty visit
     if (!diagnosis && !notes) return (errEl.textContent = "Add a diagnosis or some notes before saving.");
     try {
       await withBusy($("save-visit"), async () => {
